@@ -11,21 +11,43 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            /* Ensure the body takes full viewport height and centers content */
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             background-color: #f0f2f5; /* Light gray background */
         }
-        /* Custom styles for potential future use or overrides */
         .container {
-            max-width: 90%; /* Responsive width */
+            max-width: 90%;
+            width: 600px; /* Fixed width for the main container for better gauge scaling */
         }
         @media (min-width: 768px) {
             .container {
-                max-width: 600px; /* Max width for larger screens */
+                max-width: 600px;
             }
+        }
+
+        /* Custom CSS for the gauge and spinner */
+        canvas {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%; /* Ensure canvas scales */
+            height: auto; /* Maintain aspect ratio */
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6; /* Tailwind blue-500 */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -36,24 +58,44 @@
             Internet Speed Test
         </h1>
 
-        <!-- Display area for speed metrics -->
-        <div class="flex flex-col md:flex-row justify-around items-center space-y-6 md:space-y-0 md:space-x-6 mb-8">
-            <!-- Download Speed -->
-            <div class="speed-item bg-blue-50 p-6 rounded-lg w-full md:w-1/3 shadow-sm border border-blue-100">
-                <p class="text-sm text-blue-600 font-medium mb-2">Download Speed</p>
-                <h2 id="download-speed" class="text-4xl font-bold text-blue-700">0.00 Mbps</h2>
+        <!-- Gauge and central speed display -->
+        <div class="relative w-full aspect-square max-w-sm mx-auto mb-8">
+            <canvas id="speedGauge" class="w-full h-full"></canvas>
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <span id="current-speed-value" class="text-5xl font-bold text-gray-800 leading-none">0.00</span>
+                <span id="current-speed-unit" class="text-xl font-medium text-gray-600 mt-1">Mb/s</span>
+            </div>
+        </div>
+
+        <!-- Bottom metrics: Ping, Download, Upload -->
+        <div class="flex justify-around items-center mb-8">
+            <!-- Ping / Latency -->
+            <div class="metric-item flex flex-col items-center p-4">
+                <p class="text-sm text-gray-600 font-medium mb-1">Ping</p>
+                <div class="flex items-center">
+                    <span id="ping-value" class="text-2xl font-bold text-gray-800">0</span>
+                    <span class="text-md text-gray-600 ml-1">ms</span>
+                </div>
             </div>
 
-            <!-- Upload Speed (Placeholder) -->
-            <div class="speed-item bg-green-50 p-6 rounded-lg w-full md:w-1/3 shadow-sm border border-green-100">
-                <p class="text-sm text-green-600 font-medium mb-2">Upload Speed</p>
-                <h2 id="upload-speed" class="text-4xl font-bold text-green-700">0.00 Mbps</h2>
+            <!-- Download -->
+            <div class="metric-item flex flex-col items-center p-4">
+                <p class="text-sm text-gray-600 font-medium mb-1">Download</p>
+                <div class="flex items-center">
+                    <span id="download-value" class="text-2xl font-bold text-gray-800">--</span>
+                    <span id="download-unit" class="text-md text-gray-600 ml-1"></span>
+                    <div id="download-spinner" class="spinner ml-2 hidden"></div>
+                </div>
             </div>
 
-            <!-- Latency -->
-            <div class="speed-item bg-purple-50 p-6 rounded-lg w-full md:w-1/3 shadow-sm border border-purple-100">
-                <p class="text-sm text-purple-600 font-medium mb-2">Latency</p>
-                <h2 id="latency" class="text-4xl font-bold text-purple-700">0 ms</h2>
+            <!-- Upload -->
+            <div class="metric-item flex flex-col items-center p-4">
+                <p class="text-sm text-gray-600 font-medium mb-1">Upload</p>
+                <div class="flex items-center">
+                    <span id="upload-value" class="text-2xl font-bold text-gray-800">--</span>
+                    <span id="upload-unit" class="text-md text-gray-600 ml-1"></span>
+                    <div id="upload-spinner" class="spinner ml-2 hidden"></div>
+                </div>
             </div>
         </div>
 
@@ -68,23 +110,147 @@
     </div>
 
     <script>
-        // Ensure the DOM is fully loaded before running the script
         document.addEventListener('DOMContentLoaded', () => {
             // Get references to HTML elements
             const startButton = document.getElementById('startButton');
-            const downloadSpeedElem = document.getElementById('download-speed');
-            const uploadSpeedElem = document.getElementById('upload-speed');
-            const latencyElem = document.getElementById('latency');
+            const currentSpeedValueElem = document.getElementById('current-speed-value');
+            const currentSpeedUnitElem = document.getElementById('current-speed-unit');
+            const pingValueElem = document.getElementById('ping-value');
+            const downloadValueElem = document.getElementById('download-value');
+            const downloadUnitElem = document.getElementById('download-unit');
+            const downloadSpinnerElem = document.getElementById('download-spinner');
+            const uploadValueElem = document.getElementById('upload-value');
+            const uploadUnitElem = document.getElementById('upload-unit');
+            const uploadSpinnerElem = document.getElementById('upload-spinner');
             const statusElem = document.getElementById('status');
+
+            // Canvas for the speed gauge
+            const canvas = document.getElementById('speedGauge');
+            const ctx = canvas.getContext('2d');
+
+            // Gauge configuration
+            const gaugeConfig = {
+                startAngle: Math.PI * 0.75, // 225 degrees
+                endAngle: Math.PI * 2.25,   // 45 degrees (360 + 45 = 405 degrees)
+                radius: 100, // Base radius
+                lineWidth: 20, // Width of the gauge arc
+                backgroundColor: '#fce4ec', // Light pink background for the gauge (similar to picture)
+                fillColor: '#6366f1', // Indigo/Blue fill color (similar to picture)
+                tickColor: '#d1d5db', // Gray for tick marks
+                textColor: '#4b5563', // Dark gray for labels
+                maxSpeed: 1000, // Max speed for the gauge (Mbps)
+                tickValues: [0, 1, 5, 10, 50, 100, 500, 1000] // Values to display on ticks
+            };
+
+            // Function to draw the static parts of the gauge
+            function drawGaugeBackground() {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw background arc
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, gaugeConfig.radius, gaugeConfig.startAngle, gaugeConfig.endAngle);
+                ctx.lineWidth = gaugeConfig.lineWidth;
+                ctx.strokeStyle = gaugeConfig.backgroundColor;
+                ctx.stroke();
+
+                // Draw tick marks and labels
+                ctx.font = '12px Inter';
+                ctx.fillStyle = gaugeConfig.textColor;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                gaugeConfig.tickValues.forEach(value => {
+                    // Calculate angle for the tick value
+                    const normalizedValue = value / gaugeConfig.maxSpeed;
+                    // Ensure normalizedValue is between 0 and 1 for interpolation
+                    const clampedNormalizedValue = Math.max(0, Math.min(1, normalizedValue));
+                    const angle = gaugeConfig.startAngle + (gaugeConfig.endAngle - gaugeConfig.startAngle) * clampedNormalizedValue;
+
+                    // Calculate position for tick mark and label
+                    const tickOuterX = centerX + Math.cos(angle) * (gaugeConfig.radius + gaugeConfig.lineWidth / 2);
+                    const tickOuterY = centerY + Math.sin(angle) * (gaugeConfig.radius + gaugeConfig.lineWidth / 2);
+                    const tickInnerX = centerX + Math.cos(angle) * (gaugeConfig.radius - gaugeConfig.lineWidth / 2);
+                    const tickInnerY = centerY + Math.sin(angle) * (gaugeConfig.radius - gaugeConfig.lineWidth / 2);
+                    const labelX = centerX + Math.cos(angle) * (gaugeConfig.radius + gaugeConfig.lineWidth + 10);
+                    const labelY = centerY + Math.sin(angle) * (gaugeConfig.radius + gaugeConfig.lineWidth + 10);
+
+                    // Draw tick mark
+                    ctx.beginPath();
+                    ctx.moveTo(tickInnerX, tickInnerY);
+                    ctx.lineTo(tickOuterX, tickOuterY);
+                    ctx.strokeStyle = gaugeConfig.tickColor;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    // Draw label
+                    ctx.fillText(value.toString(), labelX, labelY);
+                });
+            }
+
+            // Function to draw the dynamic fill of the gauge
+            function drawGaugeFill(currentSpeed) {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+
+                // Clear only the fill area
+                ctx.clearRect(
+                    centerX - gaugeConfig.radius - gaugeConfig.lineWidth / 2 - 5,
+                    centerY - gaugeConfig.radius - gaugeConfig.lineWidth / 2 - 5,
+                    gaugeConfig.radius * 2 + gaugeConfig.lineWidth + 10,
+                    gaugeConfig.radius * 2 + gaugeConfig.lineWidth + 10
+                );
+                // Redraw background to ensure it's always visible
+                drawGaugeBackground();
+
+                // Calculate the end angle for the fill based on current speed
+                const normalizedSpeed = Math.min(1, currentSpeed / gaugeConfig.maxSpeed);
+                const fillAngle = gaugeConfig.startAngle + (gaugeConfig.endAngle - gaugeConfig.startAngle) * normalizedSpeed;
+
+                // Draw fill arc
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, gaugeConfig.radius, gaugeConfig.startAngle, fillAngle);
+                ctx.lineWidth = gaugeConfig.lineWidth;
+                ctx.strokeStyle = gaugeConfig.fillColor;
+                ctx.stroke();
+            }
+
+            // Function to resize canvas and redraw gauge
+            function resizeCanvas() {
+                const containerWidth = canvas.parentElement.clientWidth;
+                canvas.width = containerWidth;
+                canvas.height = containerWidth; // Keep it square for the circular gauge
+                drawGaugeBackground(); // Redraw background on resize
+            }
+
+            // Initial drawing and resize listener
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
 
             // Add event listener to the start button
             startButton.addEventListener('click', () => {
                 // Reset display and show status message
                 statusElem.textContent = 'Testing... Please wait. This may take a moment.';
-                downloadSpeedElem.textContent = '...';
-                uploadSpeedElem.textContent = '...';
-                latencyElem.textContent = '...';
+                currentSpeedValueElem.textContent = '0.00';
+                currentSpeedUnitElem.textContent = 'Mb/s';
+                pingValueElem.textContent = '0';
+                downloadValueElem.textContent = '--';
+                downloadUnitElem.textContent = '';
+                uploadValueElem.textContent = '--';
+                uploadUnitElem.textContent = '';
+                
+                // Hide spinners initially
+                downloadSpinnerElem.classList.add('hidden');
+                uploadSpinnerElem.classList.add('hidden');
+
                 startButton.disabled = true; // Disable button during test
+
+                // Reset gauge fill
+                drawGaugeFill(0);
 
                 // Run the main speed test function
                 runSpeedTest();
@@ -96,9 +262,10 @@
              */
             async function runSpeedTest() {
                 // URL for a dummy file to test download speed.
-                // Using Cloudflare's test file for reliability. It's 100MB.
-                const testFileUrl = 'https://speed.cloudflare.com/__down?bytes=100000000';
-                const fileSizeInBytes = 100 * 1024 * 1024; // 100 MB in bytes
+                // We are now using a file hosted on the same domain (GitHub Pages)
+                // to avoid CORS issues with external speed test servers.
+                const testFileUrl = './dummy_100MB.bin'; // Path to your dummy file
+                const fileSizeInBytes = 100 * 1024 * 1024; // 100 MB in bytes (ensure this matches your dummy file size)
 
                 try {
                     // --- Latency Test ---
@@ -114,10 +281,14 @@
                         latencyTotal += (endTime - startTime);
                     }
                     const avgLatency = Math.round(latencyTotal / latencyCount);
-                    latencyElem.textContent = `${avgLatency} ms`;
+                    pingValueElem.textContent = `${avgLatency}`;
 
                     // --- Download Test ---
                     statusElem.textContent = 'Measuring Download Speed...';
+                    downloadSpinnerElem.classList.remove('hidden'); // Show download spinner
+                    downloadValueElem.textContent = ''; // Clear value during test
+                    downloadUnitElem.textContent = '';
+
                     const downloadStartTime = performance.now();
                     const response = await fetch(testFileUrl, { cache: 'no-store' }); // Prevent caching
                     
@@ -126,48 +297,62 @@
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
 
-                    // Read the response body as a blob to ensure full download
-                    const blob = await response.blob();
+                    // Use a ReadableStream to get progress for live updates
+                    const reader = response.body.getReader();
+                    let receivedBytes = 0;
+                    const totalBytes = parseInt(response.headers.get('Content-Length'));
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        receivedBytes += value.length;
+                        const currentTime = performance.now();
+                        const durationInSeconds = (currentTime - downloadStartTime) / 1000;
+                        if (durationInSeconds > 0) {
+                            const currentSpeed = (receivedBytes / (1024 * 1024)) / durationInSeconds * 8; // Mbps
+                            currentSpeedValueElem.textContent = currentSpeed.toFixed(2);
+                            currentSpeedUnitElem.textContent = 'Mb/s';
+                            drawGaugeFill(currentSpeed); // Update gauge dynamically
+                        }
+                    }
+
                     const downloadEndTime = performance.now();
 
-                    // Calculate download speed
+                    // Calculate final download speed
                     const durationInSeconds = (downloadEndTime - downloadStartTime) / 1000;
-                    // Speed in Mbps: (fileSizeInBytes / (1024 * 1024)) converts bytes to MB,
-                    // then divide by seconds, then multiply by 8 to convert MB/s to Mbps.
-                    const speedInMbps = (fileSizeInBytes / (1024 * 1024)) / durationInSeconds * 8;
-                    downloadSpeedElem.textContent = `${speedInMbps.toFixed(2)} Mbps`;
+                    const speedInMbps = (fileSizeInBytes / (1024 * 1024)) / durationInSeconds * 8; // Convert Bytes/s to Mbps
+                    downloadValueElem.textContent = `${speedInMbps.toFixed(2)}`;
+                    downloadUnitElem.textContent = 'Mbps';
+                    downloadSpinnerElem.classList.add('hidden'); // Hide download spinner
 
                     // --- Upload Test (Placeholder) ---
                     // A true upload test requires a backend server to receive the data.
                     // For a front-end only application, we'll provide a placeholder.
                     statusElem.textContent = 'Upload Speed requires a backend server. Showing placeholder...';
-                    uploadSpeedElem.textContent = 'N/A'; // Not Applicable without backend
-                    // If you were to implement a simplified upload test without a backend,
-                    // you could measure how long it takes to create a large blob or send it
-                    // to a dummy endpoint that immediately responds, but this wouldn't reflect
-                    // actual network upload speed.
-                    // Example (conceptual, not a real upload test):
-                    /*
-                    const uploadDataSize = 10 * 1024 * 1024; // 10 MB dummy data
-                    const dummyData = new Blob([new ArrayBuffer(uploadDataSize)]);
-                    const uploadStartTime = performance.now();
-                    // Simulate sending data (e.g., to a non-existent endpoint or a mock service)
-                    // await fetch('/dummy-upload-endpoint', { method: 'POST', body: dummyData });
-                    const uploadEndTime = performance.now();
-                    const uploadDurationInSeconds = (uploadEndTime - uploadStartTime) / 1000;
-                    const uploadSpeedInMbps = (uploadDataSize / (1024 * 1024)) / uploadDurationInSeconds * 8;
-                    uploadSpeedElem.textContent = `${uploadSpeedInMbps.toFixed(2)} Mbps`;
-                    */
+                    uploadValueElem.textContent = '--'; // Not Applicable without backend
+                    uploadUnitElem.textContent = '';
+                    // uploadSpinnerElem.classList.remove('hidden'); // Uncomment to show upload spinner if you implement it
+                    // Simulate a brief delay for upload "test"
+                    // await new Promise(resolve => setTimeout(resolve, 1000));
+                    // uploadSpinnerElem.classList.add('hidden'); // Hide upload spinner
 
                     statusElem.textContent = 'Test complete! Click "Start Test" to run again.';
                 } catch (error) {
                     // Handle any errors during the test
-                    statusElem.textContent = `Test failed: ${error.message}. Please try again.`;
-                    console.error('Speed test error:', error);
+                    statusElem.textContent = `Test failed: Could not fetch the test file. Please ensure 'dummy_100MB.bin' is correctly hosted and your connection is stable.`;
+                    console.error('Speed test error details:', error); // Log the full error object for debugging
                     // Reset speeds to 0 or error state
-                    downloadSpeedElem.textContent = 'Error';
-                    uploadSpeedElem.textContent = 'Error';
-                    latencyElem.textContent = 'Error';
+                    currentSpeedValueElem.textContent = 'Error';
+                    currentSpeedUnitElem.textContent = '';
+                    pingValueElem.textContent = 'Error';
+                    downloadValueElem.textContent = 'Error';
+                    downloadUnitElem.textContent = '';
+                    uploadValueElem.textContent = 'Error';
+                    uploadUnitElem.textContent = '';
+                    downloadSpinnerElem.classList.add('hidden');
+                    uploadSpinnerElem.classList.add('hidden');
+                    drawGaugeFill(0); // Reset gauge
                 } finally {
                     // Re-enable the button regardless of success or failure
                     startButton.disabled = false;
