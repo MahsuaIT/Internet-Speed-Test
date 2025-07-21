@@ -261,11 +261,15 @@
              * It measures latency, download speed, and provides a placeholder for upload speed.
              */
             async function runSpeedTest() {
-                // URL for a dummy file to test download speed.
-                // We are now using a file hosted on the same domain (GitHub Pages)
-                // to avoid CORS issues with external speed test servers.
-                const testFileUrl = './dummy_100MB.bin'; // Path to your dummy file
-                const fileSizeInBytes = 100 * 1024 * 1024; // 100 MB in bytes (ensure this matches your dummy file size)
+                // Using a public test file URL for more realistic speed measurement.
+                // IMPORTANT: If you are seeing "Failed to fetch" even on GitHub Pages,
+                // it is due to CORS (Cross-Origin Resource Sharing) restrictions from the
+                // target server (e.g., speed.hetzner.de) not allowing requests from your domain.
+                // For a robust and accurate speed test (including upload), a small backend proxy
+                // server is the recommended solution. This proxy would fetch the file for your
+                // frontend, bypassing browser-side CORS limitations.
+                const testFileUrl = './dummy_100MB.bin'; // A public 100MB test file from Hetzner
+                const fileSizeInBytes = 100 * 1024 * 1024; // 100 MB in bytes (fallback if Content-Length header is missing)
 
                 try {
                     // --- Latency Test ---
@@ -300,7 +304,8 @@
                     // Use a ReadableStream to get progress for live updates
                     const reader = response.body.getReader();
                     let receivedBytes = 0;
-                    const totalBytes = parseInt(response.headers.get('Content-Length'));
+                    // Get total bytes from Content-Length header if available, otherwise use assumed fileSizeInBytes
+                    const actualTotalBytes = parseInt(response.headers.get('Content-Length')) || fileSizeInBytes;
 
                     while (true) {
                         const { done, value } = await reader.read();
@@ -310,6 +315,7 @@
                         const currentTime = performance.now();
                         const durationInSeconds = (currentTime - downloadStartTime) / 1000;
                         if (durationInSeconds > 0) {
+                            // Calculate current speed based on received bytes and elapsed time
                             const currentSpeed = (receivedBytes / (1024 * 1024)) / durationInSeconds * 8; // Mbps
                             currentSpeedValueElem.textContent = currentSpeed.toFixed(2);
                             currentSpeedUnitElem.textContent = 'Mb/s';
@@ -319,28 +325,36 @@
 
                     const downloadEndTime = performance.now();
 
-                    // Calculate final download speed
+                    // Calculate final download speed based on total bytes and total duration
                     const durationInSeconds = (downloadEndTime - downloadStartTime) / 1000;
-                    const speedInMbps = (fileSizeInBytes / (1024 * 1024)) / durationInSeconds * 8; // Convert Bytes/s to Mbps
+                    const speedInMbps = (actualTotalBytes / (1024 * 1024)) / durationInSeconds * 8; // Convert Bytes/s to Mbps
                     downloadValueElem.textContent = `${speedInMbps.toFixed(2)}`;
                     downloadUnitElem.textContent = 'Mbps';
                     downloadSpinnerElem.classList.add('hidden'); // Hide download spinner
 
                     // --- Upload Test (Placeholder) ---
                     // A true upload test requires a backend server to receive the data.
-                    // For a front-end only application, we'll provide a placeholder.
+                    // For a front-end only application, this will remain a placeholder.
                     statusElem.textContent = 'Upload Speed requires a backend server. Showing placeholder...';
                     uploadValueElem.textContent = '--'; // Not Applicable without backend
                     uploadUnitElem.textContent = '';
-                    // uploadSpinnerElem.classList.remove('hidden'); // Uncomment to show upload spinner if you implement it
-                    // Simulate a brief delay for upload "test"
-                    // await new Promise(resolve => setTimeout(resolve, 1000));
-                    // uploadSpinnerElem.classList.add('hidden'); // Hide upload spinner
+                    // If you implement a backend, you would show the spinner here:
+                    // uploadSpinnerElem.classList.remove('hidden');
+                    // And then perform your upload fetch request:
+                    // const uploadData = new Blob([new ArrayBuffer(10 * 1024 * 1024)]); // 10MB dummy data for upload
+                    // const uploadStartTime = performance.now();
+                    // await fetch('/your-upload-proxy-endpoint', { method: 'POST', body: uploadData });
+                    // const uploadEndTime = performance.now();
+                    // const uploadDurationInSeconds = (uploadEndTime - uploadStartTime) / 1000;
+                    // const uploadSpeedInMbps = (10 * 1024 * 1024 / (1024 * 1024)) / uploadDurationInSeconds * 8;
+                    // uploadValueElem.textContent = `${uploadSpeedInMbps.toFixed(2)}`;
+                    // uploadUnitElem.textContent = 'Mbps';
+                    // uploadSpinnerElem.classList.add('hidden');
 
                     statusElem.textContent = 'Test complete! Click "Start Test" to run again.';
                 } catch (error) {
                     // Handle any errors during the test
-                    statusElem.textContent = `Test failed: Could not fetch the test file. Please ensure 'dummy_100MB.bin' is correctly hosted and your connection is stable.`;
+                    statusElem.textContent = `Test failed: Could not fetch the test file. This is likely due to CORS restrictions from the test server or network issues. For a reliable test, a backend proxy is recommended.`;
                     console.error('Speed test error details:', error); // Log the full error object for debugging
                     // Reset speeds to 0 or error state
                     currentSpeedValueElem.textContent = 'Error';
