@@ -235,7 +235,7 @@
             startButton.addEventListener('click', () => {
                 // Reset display and show status message
                 statusElem.textContent = 'Testing... Please wait. This may take a moment.';
-                currentSpeedValueElem.textContent = '0.00';
+                currentSpeedValueElem.textContent = '0.00'; // Reset central display
                 currentSpeedUnitElem.textContent = 'Mb/s';
                 pingValueElem.textContent = '0';
                 downloadValueElem.textContent = '--';
@@ -312,15 +312,7 @@
                         if (done) break;
 
                         receivedBytes += value.length;
-                        const currentTime = performance.now();
-                        const durationInSeconds = (currentTime - downloadStartTime) / 1000;
-                        if (durationInSeconds > 0) {
-                            // Calculate current speed based on received bytes and elapsed time
-                            const currentSpeed = (receivedBytes / (1024 * 1024)) / durationInSeconds * 8; // Mbps
-                            currentSpeedValueElem.textContent = currentSpeed.toFixed(2);
-                            currentSpeedUnitElem.textContent = 'Mb/s';
-                            drawGaugeFill(currentSpeed); // Update gauge dynamically
-                        }
+                        // No live gauge update here to avoid volatile readings
                     }
 
                     const downloadEndTime = performance.now();
@@ -328,6 +320,12 @@
                     // Calculate final download speed based on total bytes and total duration
                     const durationInSeconds = (downloadEndTime - downloadStartTime) / 1000;
                     const speedInMbps = (actualTotalBytes / (1024 * 1024)) / durationInSeconds * 8; // Convert Bytes/s to Mbps
+                    
+                    // Update both the central gauge and the bottom download value with the final, accurate speed
+                    currentSpeedValueElem.textContent = speedInMbps.toFixed(2);
+                    currentSpeedUnitElem.textContent = 'Mb/s';
+                    drawGaugeFill(speedInMbps); // Update gauge with final accurate speed
+
                     downloadValueElem.textContent = `${speedInMbps.toFixed(2)}`;
                     downloadUnitElem.textContent = 'Mbps';
                     downloadSpinnerElem.classList.add('hidden'); // Hide download spinner
